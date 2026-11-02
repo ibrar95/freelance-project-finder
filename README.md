@@ -50,3 +50,12 @@ The running Flask process refreshes feeds on startup and every `REFRESH_MINUTES`
 ## Source-health diagnostics
 
 Source health now separates accepted hiring/payment matches from stale posts, missing dates, duplicates and new inserts. A match is not necessarily a fresh lead. Reddit HTTP 429 indicates rate limiting; this app does not bypass it. Google News indexes are not direct LinkedIn/marketplace integrations.
+
+## Discovery pipeline v3
+- Added public Remotive and Arbeitnow job APIs (no LinkedIn login, no scraping).
+- API listings require an explicit freelance/contract/project-based signal AND a nonempty published salary field. This is intentionally strict; many jobs will be rejected.
+- Reddit RSS requests may return HTTP 429; they are logged and never bypassed.
+- Google News queries include a 3-day search constraint; actual feed publication dates are still checked.
+- LinkedIn public search results are indirect, not LinkedIn API access. Do not assume full coverage.
+- Free Render services sleep; hourly refresh is only active while the instance runs.
+- Remote jobs may have country restrictions. Always inspect original listing before applying.

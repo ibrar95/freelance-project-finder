@@ -1,4 +1,4 @@
-import os, re, sqlite3, hashlib, threading, time, random
+import os, re, sqlite3, hashlib, threading, time, random, html
 from collections import Counter
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
@@ -12,6 +12,7 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 MAX_AGE_DAYS = 3  # Only show leads published within the last 72 hours.
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "projects.db"))
 REFRESH_MINUTES = max(30, int(os.environ.get("REFRESH_MINUTES", "60")))
+HTTP = requests.Session()
 app = Flask(__name__)
 
 # Public RSS feeds and indexed public search results. These are NOT private platform APIs.
@@ -35,13 +36,20 @@ GOOGLE_QUERIES = [
     ("Google News · Airtasker indexed listings", 'site:airtasker.com/tasks (website OR design OR SEO OR writing)'),
 ]
 SOURCES = [
-    ("Reddit · forhire", "https://www.reddit.com/r/forhire/search.rss?q=(wordpress%20OR%20website%20OR%20SEO%20OR%20logo%20OR%20design%20OR%20writing)&restrict_sr=1&sort=new"),
+    ("Reddit · forhire", "https://www.reddit.com/r/forhire/new/.rss"),
     ("Reddit · hireawriter", "https://www.reddit.com/r/HireaWriter/new/.rss"),
     ("Reddit · DesignJobs", "https://www.reddit.com/r/DesignJobs/new/.rss"),
-    ("Reddit · slavelabour", "https://www.reddit.com/r/slavelabour/search.rss?q=(website%20OR%20wordpress%20OR%20design%20OR%20SEO)&restrict_sr=1&sort=new"),
-    ("Reddit · DoneDirtCheap", "https://www.reddit.com/r/DoneDirtCheap/search.rss?q=(design%20OR%20website%20OR%20SEO)&restrict_sr=1&sort=new"),
+    ("Reddit · slavelabour", "https://www.reddit.com/r/slavelabour/new/.rss"),
+    ("Reddit · DoneDirtCheap", "https://www.reddit.com/r/DoneDirtCheap/new/.rss"),
 ]
-SOURCES += [(name, "https://news.google.com/rss/search?q=" + quote_plus(query) + "&hl=en-US&gl=US&ceid=US:en") for name, query in GOOGLE_QUERIES]
+SOURCES += [(name, "https://news.google.com/rss/search?q=" + quote_plus(query + " when:3d") + "&hl=en-US&gl=US&ceid=US:en") for name, query in GOOGLE_QUERIES]
+
+# Public, documented job-board endpoints; no account login or scraping.
+API_SOURCES = [
+    ("Remotive · remote jobs", "https://remotive.com/api/remote-jobs?limit=100"),
+    ("Arbeitnow · remote jobs", "https://www.arbeitnow.com/api/job-board-api"),
+]
+SOURCES += API_SOURCES
 
 KEYWORDS = {
     "Web / WordPress": ["wordpress", "website", "web developer", "web development", "landing page", "shopify", "woocommerce", "ecommerce", "web design"],
@@ -211,59 +219,86 @@ def paid_details(text):
     ok, budget, status, _ = classify_lead(text, text)
     return ok, budget
 
+def save_candidate(c, name, title, summary, link, published, category=None, paid_hint="", job_listing=False):
+    """Persist verified-dated leads. Never invent a budget or a publication date."""
+    title, summary = clean_html(title), clean_html(summary)
+    category = category or category_for(f"{title} {summary}")
+    if not title or not link or not category:
+        return "rejected"
+    if job_listing:
+        # A remote job is not automatically a freelance client project.
+        if not re.search(r"\b(freelance|contract|contractor|temporary|project.based|part.time)\b", f"{title} {summary}", re.I):
+            return "rejected"
+        if not paid_hint:
+            return "rejected"
+        if any(re.search(p, title.lower(), re.I) for p in SELLER_TITLE_PATTERNS):
+            return "rejected"
+        budget, lead_status = paid_hint, "budget_discuss"
+        if re.search(r"(?:\$|\bUSD\b|\bAUD\b|\bEUR\b|\bGBP\b)\s*\d", paid_hint, re.I):
+            lead_status = "budget_confirmed"
+    else:
+        accepted, budget, lead_status, _ = classify_lead(title, summary)
+        if not accepted:
+            return "rejected"
+    dt = parse_published(published)
+    if not dt:
+        return "undated"
+    if not is_fresh(published):
+        return "stale"
+    ident = hashlib.sha256(link.encode()).hexdigest()
+    cur = c.execute("""INSERT OR IGNORE INTO projects
+        (id,title,description,url,source,category,published,collected,budget,status)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""", (ident, title[:300], summary[:3000], link, name, category,
+        dt.isoformat(), datetime.now(timezone.utc).isoformat(), budget[:120], lead_status))
+    return "new" if cur.rowcount else "duplicate"
+
+
 def fetch_source(name, url):
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; FreelanceProjectFinder/2.0; +https://github.com/)"}
+    counts = Counter()
     try:
-        response = requests.get(url, headers=headers, timeout=12)
+        response = HTTP.get(url, headers={"User-Agent": "FreelanceProjectFinder/3.0 (public job discovery; contact via GitHub)"}, timeout=18)
         response.raise_for_status()
-        parsed = feedparser.parse(response.content)
-        added = 0
-        accepted_count = 0
-        rejected_count = 0
-        stale_count = 0
-        undated_count = 0
-        duplicate_count = 0
-        with db() as c:
+        entries = []
+        if name.startswith("Remotive"):
+            for job in response.json().get("jobs", []):
+                entries.append((job.get("title", ""), job.get("description", ""), job.get("url", ""),
+                                job.get("publication_date", ""), job.get("salary", ""), True,
+                                " ".join([str(job.get("job_type", "")), str(job.get("candidate_required_location", ""))])))
+        elif name.startswith("Arbeitnow"):
+            for job in response.json().get("data", []):
+                date = datetime.fromtimestamp(job["created_at"], timezone.utc).isoformat() if job.get("created_at") else ""
+                entries.append((job.get("title", ""), job.get("description", ""), job.get("url", ""),
+                                date, job.get("salary", "") or "", True,
+                                " ".join(str(x) for x in job.get("tags", []))))
+        else:
+            parsed = feedparser.parse(response.content)
             for e in parsed.entries[:100]:
-                title = clean_html(e.get("title", ""))
-                summary = clean_html(e.get("summary", e.get("description", "")))
-                link = e.get("link", "")
-                combined = f"{title} {summary}"
-                cat = category_for(combined)
-                accepted, budget, lead_status, _reason = classify_lead(title, summary)
-                if not title or not link or not cat or not accepted:
-                    rejected_count += 1
-                    continue
-                accepted_count += 1
-                published = e.get("published", e.get("updated", ""))
-                published_parsed = e.get("published_parsed", e.get("updated_parsed"))
-                # Reject stale or undated posts before they enter the database.
-                parsed_date = parse_published(published, published_parsed)
-                if not parsed_date:
-                    undated_count += 1
-                    continue
-                if not is_fresh(published, published_parsed):
-                    stale_count += 1
-                    continue
-                ident = hashlib.sha256(link.encode()).hexdigest()
-                cur = c.execute("""INSERT OR IGNORE INTO projects
-                    (id,title,description,url,source,category,published,collected,budget,status)
-                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                    (ident, title[:300], summary[:3000], link, name, cat, published,
-                     datetime.now(timezone.utc).isoformat(), budget[:120], lead_status))
-                added += cur.rowcount
-                if not cur.rowcount:
-                    duplicate_count += 1
-        result = {"source": name, "ok": True, "added": added, "checked": len(parsed.entries)}
+                date = e.get("published", e.get("updated", ""))
+                parsed_dt = parse_published(date, e.get("published_parsed", e.get("updated_parsed")))
+                entries.append((e.get("title", ""), e.get("summary", e.get("description", "")),
+                                e.get("link", ""), parsed_dt.isoformat() if parsed_dt else date,
+                                "", False, ""))
         with db() as c:
-            c.execute("INSERT OR REPLACE INTO source_runs(source,checked_at,ok,checked,accepted,rejected,added,error,stale,duplicate,undated) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                      (name, datetime.now(timezone.utc).isoformat(), 1, len(parsed.entries), accepted_count, rejected_count, added, "", stale_count, duplicate_count, undated_count))
-        return result
+            for title, summary, link, published, salary, job_listing, extra in entries:
+                # Preserve location/contract information to allow users to check eligibility.
+                summary = f"{extra} {summary}" if extra else summary
+                result = save_candidate(c, name, title, summary, link, published, paid_hint=str(salary), job_listing=job_listing)
+                counts[result] += 1
+            checked = len(entries)
+            c.execute("""INSERT OR REPLACE INTO source_runs
+                (source,checked_at,ok,checked,accepted,rejected,added,error,stale,duplicate,undated)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (name, datetime.now(timezone.utc).isoformat(), 1, checked,
+                 checked-counts["rejected"], counts["rejected"], counts["new"], "",
+                 counts["stale"], counts["duplicate"], counts["undated"]))
+        return {"source": name, "ok": True, "added": counts["new"], "checked": checked}
     except Exception as ex:
         error = str(ex)[:180]
         with db() as c:
-            c.execute("INSERT OR REPLACE INTO source_runs(source,checked_at,ok,checked,accepted,rejected,added,error) VALUES(?,?,?,?,?,?,?,?)",
-                      (name, datetime.now(timezone.utc).isoformat(), 0, 0, 0, 0, 0, error))
+            c.execute("""INSERT OR REPLACE INTO source_runs
+                (source,checked_at,ok,checked,accepted,rejected,added,error,stale,duplicate,undated)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (name, datetime.now(timezone.utc).isoformat(), 0, 0, 0, 0, 0, error, 0, 0, 0))
         return {"source": name, "ok": False, "added": 0, "error": error}
 
 refresh_lock = threading.Lock()
@@ -312,9 +347,9 @@ def projects():
         filtered = []
         for r in rows:
             ok, budget, lead_status, _reason = classify_lead(r.get('title', ''), r.get('description', ''))
-            if ok and is_fresh(r.get('published', '')):
+            if (ok or r.get('source', '').startswith(('Remotive', 'Arbeitnow'))) and is_fresh(r.get('published', '')):
                 r['budget'] = r.get('budget') or budget
-                r['status'] = lead_status
+                r['status'] = r.get('status') if r.get('source', '').startswith(('Remotive', 'Arbeitnow')) else lead_status
                 filtered.append(r)
         rows = filtered
         rows.sort(key=lambda r: parse_published(r.get('published', '')) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
@@ -331,7 +366,7 @@ def status():
     init_db()
     with db() as c:
         rows = c.execute("SELECT title, description, published FROM projects").fetchall()
-        total = sum(1 for x in rows if classify_lead(x['title'], x['description'])[0] and is_fresh(x['published']))
+        total = sum(1 for x in rows if is_fresh(x['published']))
         latest = c.execute("SELECT MAX(checked_at) FROM source_runs").fetchone()[0]
         runs = [dict(x) for x in c.execute("SELECT source, checked_at, ok, checked, accepted, rejected, added, error, stale, duplicate, undated FROM source_runs ORDER BY source").fetchall()]
     return jsonify({"total": total, "last_refresh": latest, "sources": len(SOURCES), "max_age_days": MAX_AGE_DAYS, "source_runs": runs})
