@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from flask import Flask, render_template, request, jsonify
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-MAX_AGE_DAYS = 3  # Only show leads published within the last 72 hours.
+MAX_AGE_DAYS = 7  # Default and storage window: seven days.
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "projects.db"))
 REFRESH_MINUTES = max(30, int(os.environ.get("REFRESH_MINUTES", "60")))
 HTTP = requests.Session()
@@ -42,7 +42,7 @@ SOURCES = [
     ("Reddit · slavelabour", "https://www.reddit.com/r/slavelabour/new/.rss"),
     ("Reddit · DoneDirtCheap", "https://www.reddit.com/r/DoneDirtCheap/new/.rss"),
 ]
-SOURCES += [(name, "https://news.google.com/rss/search?q=" + quote_plus(query + " when:3d") + "&hl=en-US&gl=US&ceid=US:en") for name, query in GOOGLE_QUERIES]
+SOURCES += [(name, "https://news.google.com/rss/search?q=" + quote_plus(query + " when:7d") + "&hl=en-US&gl=US&ceid=US:en") for name, query in GOOGLE_QUERIES]
 
 # Public, documented job-board endpoints; no account login or scraping.
 API_SOURCES = [
@@ -152,12 +152,12 @@ def parse_published(value, parsed_tuple=None):
             pass
     return None
 
-def is_fresh(value, parsed_tuple=None):
+def is_fresh(value, parsed_tuple=None, days=MAX_AGE_DAYS):
     published_dt = parse_published(value, parsed_tuple)
     if not published_dt:
         return False
     now = datetime.now(timezone.utc)
-    return now - timedelta(hours=1) <= published_dt <= now + timedelta(minutes=15) or (published_dt <= now + timedelta(minutes=15) and now - published_dt <= timedelta(days=MAX_AGE_DAYS))
+    return now - timedelta(hours=1) <= published_dt <= now + timedelta(minutes=15) or (published_dt <= now + timedelta(minutes=15) and now - published_dt <= timedelta(days=days))
 
 def clean_html(s):
     return BeautifulSoup(s or "", "html.parser").get_text(" ", strip=True)
@@ -184,7 +184,13 @@ def classify_lead(title, description):
         return False, "", "rejected", "seller_advertisement"
 
     client_signal = any(re.search(p, t, re.I) for p in CLIENT_INTENT_PATTERNS)
-    if not client_signal:
+    # Relaxed mode: accept clear buyer project requests even without formal "hiring" phrasing.
+    project_request = bool(re.search(
+        r"\b(?:need|looking for|seeking|wanted|require|required|help with|project for|contract for)\b.{0,95}"
+        r"(?:website|wordpress|shopify|logo|branding|design|seo|marketing|copywriting|content|writer|video|editor|reels|youtube|developer|freelancer)\b"
+        r"|\b(?:website|wordpress|shopify|logo|branding|design|seo|marketing|copywriting|content|video|editing)\b.{0,65}"
+        r"(?:needed|required|wanted|project|contract|freelance gig)\b", t, re.I))
+    if not (client_signal or project_request):
         return False, "", "rejected", "no_client_hiring_signal"
 
     # Reject self-promotion when seller language dominates and there is no explicit hiring title.
@@ -197,14 +203,15 @@ def classify_lead(title, description):
     paid_signal = any(re.search(p, t, re.I) for p in PAYMENT_PATTERNS)
     negotiable_signal = any(re.search(p, t, re.I) for p in NEGOTIABLE_PATTERNS)
     if not (paid_signal or negotiable_signal):
-        return False, "", "rejected", "no_payment_clue"
+        # No invented budget: mark a genuine buyer request as needing verification.
+        return True, "Budget not stated — confirm with client", "potential_lead", "client_request_budget_unknown"
 
     # Avoid accepting unrelated business metrics (e.g. ad spend/ROAS) as the project budget.
     if amount:
         around = t[max(0, amount.start()-80):min(len(t), amount.end()+80)]
         nearby_payment = any(x in around for x in ["budget", "pay", "paid", "rate", "hour", "per project", "compensation", "salary", "payment", "fixed-price", "fixed price"])
         if not nearby_payment and not negotiable_signal:
-            return False, "", "rejected", "amount_not_linked_to_payment"
+            return True, "Budget not confirmed — verify with client", "potential_lead", "unrelated_amount_not_budget"
 
     if amount:
         budget = amount.group(0).strip()
@@ -230,10 +237,10 @@ def save_candidate(c, name, title, summary, link, published, category=None, paid
         if not re.search(r"\b(freelance|contract|contractor|temporary|project.based|part.time)\b", f"{title} {summary}", re.I):
             return "rejected"
         if not paid_hint:
-            return "rejected"
+            paid_hint = "Budget not stated — confirm with client"
         if any(re.search(p, title.lower(), re.I) for p in SELLER_TITLE_PATTERNS):
             return "rejected"
-        budget, lead_status = paid_hint, "budget_discuss"
+        budget, lead_status = paid_hint, ("potential_lead" if "not stated" in paid_hint else "budget_discuss")
         if re.search(r"(?:\$|\bUSD\b|\bAUD\b|\bEUR\b|\bGBP\b)\s*\d", paid_hint, re.I):
             lead_status = "budget_confirmed"
     else:
@@ -333,6 +340,7 @@ def projects():
     init_db()
     q = request.args.get("q", "").strip()
     cat = request.args.get("category", "").strip()
+    days = 3 if request.args.get("days") == "3" else 7
     with db() as c:
         sql = "SELECT * FROM projects WHERE 1=1"
         args = []
@@ -343,11 +351,11 @@ def projects():
             sql += " AND category = ?"
             args.append(cat)
         rows = [dict(x) for x in c.execute(sql, args).fetchall()]
-        # Recheck rows using title-aware buyer/seller classification and the 72-hour window.
+        # Recheck rows using title-aware buyer/seller classification and selected window.
         filtered = []
         for r in rows:
             ok, budget, lead_status, _reason = classify_lead(r.get('title', ''), r.get('description', ''))
-            if (ok or r.get('source', '').startswith(('Remotive', 'Arbeitnow'))) and is_fresh(r.get('published', '')):
+            if (ok or r.get('source', '').startswith(('Remotive', 'Arbeitnow'))) and is_fresh(r.get('published', ''), days=days):
                 r['budget'] = r.get('budget') or budget
                 r['status'] = r.get('status') if r.get('source', '').startswith(('Remotive', 'Arbeitnow')) else lead_status
                 filtered.append(r)
@@ -355,7 +363,7 @@ def projects():
         rows.sort(key=lambda r: parse_published(r.get('published', '')) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
         rows = rows[:250]
         total = len(rows)
-    return jsonify({"projects": rows, "total": total, "max_age_days": MAX_AGE_DAYS})
+    return jsonify({"projects": rows, "total": total, "max_age_days": days})
 
 @app.route("/api/refresh", methods=["POST"])
 def refresh():
@@ -366,7 +374,7 @@ def status():
     init_db()
     with db() as c:
         rows = c.execute("SELECT title, description, published FROM projects").fetchall()
-        total = sum(1 for x in rows if is_fresh(x['published']))
+        total = sum(1 for x in rows if is_fresh(x['published'], days=7))
         latest = c.execute("SELECT MAX(checked_at) FROM source_runs").fetchone()[0]
         runs = [dict(x) for x in c.execute("SELECT source, checked_at, ok, checked, accepted, rejected, added, error, stale, duplicate, undated FROM source_runs ORDER BY source").fetchall()]
     return jsonify({"total": total, "last_refresh": latest, "sources": len(SOURCES), "max_age_days": MAX_AGE_DAYS, "source_runs": runs})

@@ -12,19 +12,20 @@
 </header>
 <main>
   <section class="intro">
-    <div><span class="eyebrow">PAID PROJECT RADAR</span><h2>Find paid work. Skip the noise.</h2><p>Client hiring requests only. Budget-confirmed and budget-discussion leads are labelled separately. Default freshness window: last 72 hours.</p></div>
+    <div><span class="eyebrow">PAID PROJECT RADAR</span><h2>Find paid work. Skip the noise.</h2><p>Client hiring requests only. Budget-confirmed and budget-discussion leads are labelled separately. Relaxed buyer-intent matching. Budget-unconfirmed leads are labelled. Default freshness: last 7 days.</p></div>
     <div class="stats"><div><strong id="total">—</strong><span>Paid leads found</span></div><div><strong id="last">—</strong><span>Last refresh</span></div></div>
   </section>
   <section class="toolbar">
     <input id="search" placeholder="Search paid projects, skills or keywords…">
     <select id="category"><option value="">All categories</option><option>Web / WordPress</option><option>Graphic Design</option><option>SEO / Marketing</option><option>Writing / Content</option><option>Video Editing</option></select>
+    <select id="days" aria-label="Project age"><option value="7" selected>Recent · 7 days</option><option value="3">Fresh · 72 hours</option></select>
     <button id="searchBtn">Search</button>
   </section>
-  <div class="subline"><span id="count">Loading paid project feeds…</span><span>Last 72 hours only · Newest first</span></div>
+  <div class="subline"><span id="count">Loading paid project feeds…</span><span id="windowLabel">Last 7 days · Newest first</span></div>
   <section id="cards" class="cards"><div class="empty">Loading public project feeds…</div></section>
   <section class="sources"><h3>Source health</h3><p>Feed status helps distinguish zero matching projects from a source that could not be reached.</p><div id="sourceHealth" class="sourcehealth"><p class="healthnote">Checking sources…</p></div></section>
   <section class="sources"><h3>Sources monitored</h3><p>Worldwide public Reddit feeds and Google News indexed results, including searches targeting public LinkedIn, Upwork, Freelancer, PeoplePerHour, Contra and Airtasker pages. These are search/index results, not direct integrations or complete platform coverage. Login-protected content is not accessed.</p><div class="sourcechips">Reddit public feeds <span>Google News public index</span><span>LinkedIn public index search</span><span>Freelance-platform indexed pages</span></div></section>
-  <footer>Freshness filter excludes posts older than 72 hours and posts with no reliable publication date. Budget-discussion leads require you to confirm the amount with the client. Payment clues are not proof that a listing is still open: always verify the original listing, budget, client and deadline before applying. Search-indexed results may still point to a closed listing. Never pay a client to receive work.</footer>
+  <footer>Default freshness filter excludes posts older than 7 days and posts with no reliable publication date. Budget-discussion leads require you to confirm the amount with the client. Payment clues are not proof that a listing is still open: always verify the original listing, budget, client and deadline before applying. Search-indexed results may still point to a closed listing. Never pay a client to receive work.</footer>
 </main>
 <div id="toast"></div>
 <script src="/static/app.js"></script>
