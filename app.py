@@ -19,8 +19,8 @@ GOOGLE_QUERIES = [
     ("Google News · design client work", '("graphic designer needed" OR "need a logo designer" OR "looking for a designer") (budget OR paid OR "$" OR hourly)'),
     ("Google News · SEO client work", '("SEO expert needed" OR "looking for SEO help" OR "need an SEO specialist") (budget OR paid OR "$" OR hourly)'),
     ("Google News · writing client work", '("content writer needed" OR "looking for a copywriter" OR "need a blog writer") (budget OR paid OR "$" OR per word)'),
-    ("Google News · LinkedIn public posts", 'site:linkedin.com/posts ("I am hiring" OR "we are hiring" OR "looking for a freelancer" OR "need a freelancer" OR "freelancer required") (budget OR paid OR "$" OR hourly)'),
-    ("Google News · LinkedIn public jobs", 'site:linkedin.com/jobs/view (freelance OR contract OR "part-time") (WordPress OR designer OR SEO OR writer) (salary OR pay OR compensation OR "$" OR budget)'),
+    ("Google News · LinkedIn public posts", 'site:linkedin.com/posts ("I am hiring" OR "we are hiring" OR "looking to hire" OR "need a WordPress developer" OR "need a designer" OR "looking for a freelancer" OR "freelancer required") (WordPress OR website OR design OR SEO OR writer)'),
+    ("Google News · LinkedIn public jobs", 'site:linkedin.com/jobs/view (freelance OR contract OR "part-time") (WordPress OR developer OR designer OR SEO OR writer) (hiring OR remote OR project)'),
     ("Google News · Upwork indexed listings", 'site:upwork.com/freelance-jobs/ (WordPress OR design OR SEO OR writing) (budget OR hourly)'),
     ("Google News · Freelancer indexed listings", 'site:freelancer.com/projects/ (WordPress OR design OR SEO OR writing)'),
     ("Google News · PeoplePerHour indexed listings", 'site:peopleperhour.com/freelance-jobs (WordPress OR design OR SEO OR writing)'),
@@ -42,38 +42,48 @@ KEYWORDS = {
     "SEO / Marketing": ["seo", "keyword research", "on-page", "backlink", "digital marketing", "social media manager", "facebook ads", "instagram ads"],
     "Writing / Content": ["content writing", "content writer", "blog", "article", "copywriting", "copywriter", "product description", "website content", "writer", "proofreading"],
 }
-# Reject editorial/search-noise, unpaid work and freelancer self-advertising.
+# Classification is deliberately split into client intent and payment confidence.
+# Public feeds contain both buyers and sellers; title-level seller signals take priority.
 EXCLUDE = [
     "best freelance websites", "best freelancing websites", "how to find freelancers", "how to hire freelancers",
     "top freelance websites", "freelance website list", "freelancing tips", "ultimate guide", "quick guide",
     "what is freelancing", "course", "webinar", "tutorial", "template download", "job alert newsletter",
     "volunteer", "unpaid", "no pay", "no payment", "exposure only", "commission only", "internship unpaid",
-    "full-time employee", "full time employee", "salary package", "investment opportunity"
+    "full-time employee", "full time employee", "investment opportunity"
 ]
-SELLER_PATTERNS = [
-    r"\[\s*for hire\s*\]", r"\[\s*available for hire\s*\]", r"\bfor hire\b",
+SELLER_TITLE_PATTERNS = [
+    r"^\s*\[\s*for hire\s*\]", r"^\s*\[\s*available for hire\s*\]", r"^\s*\[\s*services?\s*\]",
+    r"^\s*for hire\b", r"^\s*i(?:'m| am) (?:a |an )?(?:freelancer|designer|developer|writer|agency)\b"
+]
+SELLER_BODY_PATTERNS = [
     r"\bi offer\b", r"\bi provide\b", r"\bmy services\b", r"\bmy portfolio\b",
     r"\blooking for work\b", r"\blooking for clients\b", r"\bseeking clients\b",
-    r"\bavailable immediately\b", r"\bhire me\b", r"\bwork with me\b",
-    r"\bmy rate(?:s)?\b", r"\brates start\b", r"\bstarting at \$", r"\bfeel free to dm if (?:you|anyone) (?:need|want)",
+    r"\bavailable immediately\b", r"\bhire me\b", r"\bmy rate(?:s)?\b", r"\brates start\b",
+    r"\bstarting at \$", r"\bfeel free to dm if (?:you|anyone) (?:need|want)",
     r"\bi can (?:help|build|design|create|make|write|redesign) (?:you|your)\b"
 ]
-# Positive client-side signals only. Generic words such as "project", "client" or "contract" are not enough.
 CLIENT_INTENT_PATTERNS = [
-    r"\[\s*hiring\s*\]", r"\[\s*job\s*\]", r"\bwe(?:'| a)?re hiring\b", r"\bi(?:'| a)?m hiring\b",
-    r"\blooking to hire\b", r"\blooking for a freelancer\b", r"\bneed (?:a|an|someone|help)\b",
-    r"\b(?:developer|designer|writer|seo specialist|wordpress expert|virtual assistant) needed\b",
-    r"\bseeking (?:a|an) (?:freelancer|developer|designer|writer|contractor)\b",
+    r"\[\s*hiring\s*\]", r"\[\s*job\s*\]", r"\bwe(?:'re| are) hiring\b", r"\bi(?:'m| am) hiring\b",
+    r"\blooking to hire\b", r"\blooking for (?:a |an )?(?:freelancer|developer|designer|writer|agency|virtual assistant)\b",
+    r"\bneed (?:a |an |someone|help|someone to)\b", r"\b(?:developer|designer|writer|seo specialist|wordpress expert|virtual assistant) needed\b",
+    r"\bseeking (?:a |an )?(?:freelancer|developer|designer|writer|contractor)\b",
     r"\bfreelancer required\b", r"\bfreelancer wanted\b", r"\bclient is looking for\b",
     r"\bcan someone (?:build|design|develop|write|help|create)\b", r"\bwho can (?:build|design|develop|write)\b",
     r"\bneed someone to\b", r"\blooking for someone to\b", r"\bproject for (?:a|an) freelancer\b",
-    r"\bcommissioning (?:a|an)\b", r"\bseeking applications\b", r"\bjob opening\b"
+    r"\bcommissioning (?:a|an)\b", r"\bseeking applications\b", r"\bjob opening\b",
+    r"\bwant to hire\b", r"\bwe need (?:a |an )?(?:developer|designer|writer|freelancer|wordpress|website)\b"
 ]
-PAID_PATTERNS = [
+PAYMENT_PATTERNS = [
     r"\$\s?\d[\d,.]*(?:\s?(?:-|to)\s?\$?\d[\d,.]*)?",
     r"\b(?:usd|aud|gbp|eur|pkr)\s?\d[\d,.]*",
     r"\b(?:budget|fixed[- ]price|hourly rate|per hour|paid project|paid work|payment|paying|compensation|salary|rate is|budget is)\b",
     r"\b\d+(?:\.\d+)?\s?(?:/hour|per hour|an hour|per word|per article|per project)\b"
+]
+NEGOTIABLE_PATTERNS = [
+    r"\bbudget (?:is )?(?:negotiable|flexible|to be discussed|open)\b",
+    r"\b(?:rate|payment|compensation) (?:is )?(?:negotiable|flexible|to be discussed)\b",
+    r"\bpaid (?:freelance|project|contract|work)\b", r"\bopen to (?:discussing|negotiating) (?:the )?(?:budget|rate|payment)\b",
+    r"\bcompetitive (?:pay|rate|compensation)\b", r"\bwill pay\b", r"\bpayment provided\b"
 ]
 
 def db():
@@ -88,6 +98,16 @@ def init_db():
             source TEXT, category TEXT, published TEXT, collected TEXT,
             budget TEXT DEFAULT '', status TEXT DEFAULT 'new'
         )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS source_runs (
+            source TEXT PRIMARY KEY, checked_at TEXT, ok INTEGER, checked INTEGER DEFAULT 0,
+            accepted INTEGER DEFAULT 0, rejected INTEGER DEFAULT 0,
+            added INTEGER DEFAULT 0, error TEXT DEFAULT ''
+        )""")
+        columns = {row[1] for row in c.execute("PRAGMA table_info(source_runs)").fetchall()}
+        if "accepted" not in columns:
+            c.execute("ALTER TABLE source_runs ADD COLUMN accepted INTEGER DEFAULT 0")
+        if "rejected" not in columns:
+            c.execute("ALTER TABLE source_runs ADD COLUMN rejected INTEGER DEFAULT 0")
 
 def parse_published(value, parsed_tuple=None):
     """Return an aware UTC datetime; unknown dates are rejected for freshness."""
@@ -130,28 +150,55 @@ def category_for(text):
             return category
     return None
 
-def paid_details(text):
-    t = text.lower()
+def classify_lead(title, description):
+    """Return (accepted, budget_label, confidence_status, reason)."""
+    title = title or ""
+    description = description or ""
+    combined = f"{title} {description}"
+    t = combined.lower()
+    title_l = title.lower()
     if any(x in t for x in EXCLUDE):
-        return False, ""
-    # Reject obvious freelancer advertisements before checking for money.
-    if any(re.search(p, t, re.I) for p in SELLER_PATTERNS):
-        return False, ""
-    if not any(re.search(p, t, re.I) for p in CLIENT_INTENT_PATTERNS):
-        return False, ""
-    if not any(re.search(p, t, re.I) for p in PAID_PATTERNS):
-        return False, ""
-    # Avoid treating unrelated spend/earnings figures as the project's budget.
-    money = re.search(r"(?:\$\s?\d[\d,.]*(?:\s?(?:-|to)\s?\$?\d[\d,.]*)?|\b\d[\d,.]*\s?(?:USD|AUD|GBP|EUR|PKR)\b)", text, re.I)
-    if money:
-        around = text[max(0, money.start()-65):min(len(text), money.end()+65)].lower()
-        if not any(term in around for term in ["budget", "pay", "paid", "rate", "hour", "per project", "compensation", "salary", "payment", "fixed-price", "fixed price"]):
-            # A client-side hiring post with a clear currency amount can still be a paid lead,
-            # but a large unrelated business metric (e.g. ad spend/ROAS) is not enough.
-            if not re.search(r"(?:budget|pay|paid|rate|hour|compensation|salary|payment)\D{0,35}" + re.escape(money.group(0)), text, re.I):
-                return False, ""
-    m = re.search(r"(?:\$\s?\d[\d,.]*(?:\s?(?:-|to)\s?\$?\d[\d,.]*)?|\b\d[\d,.]*\s?(?:USD|AUD|GBP|EUR|PKR)\b|\b(?:budget|hourly rate|fixed[- ]price|per hour|per word)\b[^.;,]{0,45})", text, re.I)
-    return True, (m.group(0).strip() if m else "Paid terms mentioned")
+        return False, "", "rejected", "unpaid_or_noise"
+
+    # A clear [For Hire] title is a seller advertisement, even if it quotes a price.
+    if any(re.search(p, title_l, re.I) for p in SELLER_TITLE_PATTERNS):
+        return False, "", "rejected", "seller_advertisement"
+
+    client_signal = any(re.search(p, t, re.I) for p in CLIENT_INTENT_PATTERNS)
+    if not client_signal:
+        return False, "", "rejected", "no_client_hiring_signal"
+
+    # Reject self-promotion when seller language dominates and there is no explicit hiring title.
+    explicit_hiring_title = bool(re.search(r"^\s*\[\s*(?:hiring|job)\s*\]", title_l, re.I))
+    seller_signal = any(re.search(p, description.lower(), re.I) for p in SELLER_BODY_PATTERNS)
+    if seller_signal and not explicit_hiring_title:
+        return False, "", "rejected", "seller_self_promotion"
+
+    amount = re.search(r"(?:\$\s?\d[\d,.]*(?:\s?(?:-|to)\s?\$?\d[\d,.]*)?|\b\d[\d,.]*\s?(?:USD|AUD|GBP|EUR|PKR)\b)", combined, re.I)
+    paid_signal = any(re.search(p, t, re.I) for p in PAYMENT_PATTERNS)
+    negotiable_signal = any(re.search(p, t, re.I) for p in NEGOTIABLE_PATTERNS)
+    if not (paid_signal or negotiable_signal):
+        return False, "", "rejected", "no_payment_clue"
+
+    # Avoid accepting unrelated business metrics (e.g. ad spend/ROAS) as the project budget.
+    if amount:
+        around = t[max(0, amount.start()-80):min(len(t), amount.end()+80)]
+        nearby_payment = any(x in around for x in ["budget", "pay", "paid", "rate", "hour", "per project", "compensation", "salary", "payment", "fixed-price", "fixed price"])
+        if not nearby_payment and not negotiable_signal:
+            return False, "", "rejected", "amount_not_linked_to_payment"
+
+    if amount:
+        budget = amount.group(0).strip()
+        return True, budget, "budget_confirmed", "client_hiring_with_amount"
+    if negotiable_signal:
+        return True, "Budget/rate negotiable — confirm with client", "budget_discuss", "client_hiring_budget_discussion"
+    m = re.search(r"\b(?:budget|hourly rate|fixed[- ]price|per hour|per word|paid work|paid project)\b[^.;,]{0,55}", combined, re.I)
+    return True, (m.group(0).strip() if m else "Payment mentioned — verify details"), "budget_discuss", "client_hiring_payment_clue"
+
+# Backwards-compatible wrapper for existing filtering call sites.
+def paid_details(text):
+    ok, budget, status, _ = classify_lead(text, text)
+    return ok, budget
 
 def fetch_source(name, url):
     headers = {"User-Agent": "Mozilla/5.0 (compatible; FreelanceProjectFinder/2.0; +https://github.com/)"}
@@ -160,6 +207,8 @@ def fetch_source(name, url):
         response.raise_for_status()
         parsed = feedparser.parse(response.content)
         added = 0
+        accepted_count = 0
+        rejected_count = 0
         with db() as c:
             for e in parsed.entries[:100]:
                 title = clean_html(e.get("title", ""))
@@ -167,9 +216,11 @@ def fetch_source(name, url):
                 link = e.get("link", "")
                 combined = f"{title} {summary}"
                 cat = category_for(combined)
-                is_paid, budget = paid_details(combined)
-                if not title or not link or not cat or not is_paid:
+                accepted, budget, lead_status, _reason = classify_lead(title, summary)
+                if not title or not link or not cat or not accepted:
+                    rejected_count += 1
                     continue
+                accepted_count += 1
                 published = e.get("published", e.get("updated", ""))
                 published_parsed = e.get("published_parsed", e.get("updated_parsed"))
                 # Reject stale or undated posts before they enter the database.
@@ -177,14 +228,22 @@ def fetch_source(name, url):
                     continue
                 ident = hashlib.sha256(link.encode()).hexdigest()
                 cur = c.execute("""INSERT OR IGNORE INTO projects
-                    (id,title,description,url,source,category,published,collected,budget)
-                    VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (id,title,description,url,source,category,published,collected,budget,status)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
                     (ident, title[:300], summary[:3000], link, name, cat, published,
-                     datetime.now(timezone.utc).isoformat(), budget[:120]))
+                     datetime.now(timezone.utc).isoformat(), budget[:120], lead_status))
                 added += cur.rowcount
-        return {"source": name, "ok": True, "added": added, "checked": len(parsed.entries)}
+        result = {"source": name, "ok": True, "added": added, "checked": len(parsed.entries)}
+        with db() as c:
+            c.execute("INSERT OR REPLACE INTO source_runs(source,checked_at,ok,checked,accepted,rejected,added,error) VALUES(?,?,?,?,?,?,?,?)",
+                      (name, datetime.now(timezone.utc).isoformat(), 1, len(parsed.entries), accepted_count, rejected_count, added, ""))
+        return result
     except Exception as ex:
-        return {"source": name, "ok": False, "added": 0, "error": str(ex)[:180]}
+        error = str(ex)[:180]
+        with db() as c:
+            c.execute("INSERT OR REPLACE INTO source_runs(source,checked_at,ok,checked,accepted,rejected,added,error) VALUES(?,?,?,?,?,?,?,?)",
+                      (name, datetime.now(timezone.utc).isoformat(), 0, 0, 0, 0, 0, error))
+        return {"source": name, "ok": False, "added": 0, "error": error}
 
 def refresh_all():
     return [fetch_source(n, u) for n, u in SOURCES]
@@ -217,9 +276,15 @@ def projects():
             sql += " AND category = ?"
             args.append(cat)
         rows = [dict(x) for x in c.execute(sql, args).fetchall()]
-        # Recheck legacy rows: paid intent AND a known publication date within 72 hours.
-        rows = [r for r in rows if paid_details(f"{r.get('title','')} {r.get('description','')}" )[0]
-                and is_fresh(r.get('published', ''))]
+        # Recheck rows using title-aware buyer/seller classification and the 72-hour window.
+        filtered = []
+        for r in rows:
+            ok, budget, lead_status, _reason = classify_lead(r.get('title', ''), r.get('description', ''))
+            if ok and is_fresh(r.get('published', '')):
+                r['budget'] = r.get('budget') or budget
+                r['status'] = lead_status
+                filtered.append(r)
+        rows = filtered
         rows.sort(key=lambda r: parse_published(r.get('published', '')) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
         rows = rows[:250]
         total = len(rows)
@@ -233,10 +298,11 @@ def refresh():
 def status():
     init_db()
     with db() as c:
-        rows = c.execute("SELECT title, description FROM projects").fetchall()
-        total = sum(1 for x in rows if paid_details(f"{x['title']} {x['description']}")[0] and is_fresh(x['published']))
-        latest = c.execute("SELECT MAX(collected) FROM projects").fetchone()[0]
-    return jsonify({"total": total, "last_refresh": latest, "sources": len(SOURCES), "max_age_days": MAX_AGE_DAYS})
+        rows = c.execute("SELECT title, description, published FROM projects").fetchall()
+        total = sum(1 for x in rows if classify_lead(x['title'], x['description'])[0] and is_fresh(x['published']))
+        latest = c.execute("SELECT MAX(checked_at) FROM source_runs").fetchone()[0]
+        runs = [dict(x) for x in c.execute("SELECT source, checked_at, ok, checked, accepted, rejected, added, error FROM source_runs ORDER BY source").fetchall()]
+    return jsonify({"total": total, "last_refresh": latest, "sources": len(SOURCES), "max_age_days": MAX_AGE_DAYS, "source_runs": runs})
 
 @app.route("/health")
 def health():

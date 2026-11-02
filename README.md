@@ -1,22 +1,38 @@
-# Freelance Project Finder — Paid Leads
+# Freelance Project Finder
 
-A Flask dashboard that collects selected **public RSS feeds and indexed public search results** for freelance opportunities in Web/WordPress, Graphic Design, SEO/Marketing and Writing/Content.
+A read-only dashboard that collects publicly accessible freelance opportunity candidates from public Reddit RSS feeds and Google News indexed search results. It does not log into platforms, bypass access controls, submit proposals, or apply to jobs.
 
-## Paid-only filter
-A listing is stored only when its title/description contains (1) a client-side hiring/request signal, (2) a payment clue, and (3) no obvious freelancer self-promotion signal. Posts marked `[For Hire]`, service advertisements, portfolio pitches and people looking for work are rejected. This is still a text-based heuristic, not a guarantee: some ambiguous posts may pass or genuine jobs may be missed. Verify the original post, budget and whether it is still open.
+## What the filters do
 
-## Sources and limitations
-The app reads public Reddit RSS feeds and Google News RSS searches. Some Google News searches target indexed public pages from LinkedIn, Upwork, Freelancer, PeoplePerHour, Contra and Airtasker. LinkedIn results depend on public pages being indexed by Google News; they may be absent or delayed, and this is not a direct LinkedIn jobs feed. This is **not** a direct integration with those platforms and does not provide complete coverage. It does not bypass login, CAPTCHA, paywalls, private groups or platform access controls. Feeds may be unavailable or return no results.
+- Keeps posts with a recognizable client-side hiring/request signal.
+- Rejects obvious freelancer self-promotion, including `[For Hire]` posts and service advertisements.
+- Shows two payment-confidence labels:
+  - `budget_confirmed`: a currency amount was found in a payment-related context.
+  - `budget_discuss`: the client indicates paid work or says the budget/rate is negotiable or to be discussed.
+- Excludes unpaid/volunteer posts and posts without a reliable publication date.
+- Shows posts published within the last 72 hours only.
+- Each card links to the original source; users must verify that the listing is still open and confirm payment details themselves.
+
+## Source limitations
+
+- LinkedIn, Upwork, Freelancer, PeoplePerHour, Contra and Airtasker results are discovered through public Google News/indexed search results, not direct platform APIs. Coverage is incomplete and new posts may not be indexed immediately.
+- Reddit results use public RSS feeds. Feed availability and search coverage can change.
+- The Source health panel shows which feeds were reached, how many entries were checked, how many passed the filters, and how many new records were stored.
+- A source can be reachable but return zero matching leads. This does not prove there are no projects on that platform.
 
 ## Run locally
+
 ```bash
 pip install -r requirements.txt
 python app.py
 ```
-Open `http://127.0.0.1:5000`.
 
-## Deploy on Render
-- Build command: `pip install -r requirements.txt`
-- Start command: `gunicorn app:app`
+Open `http://localhost:5000`.
 
-The app refreshes on startup and approximately every four hours while running. A manual refresh is also available. On Render Free, the service may sleep while idle; the next request wakes it. Local SQLite data may not persist across restarts/redeploys on ephemeral storage.
+## Deploy
+
+Configured for Render with `gunicorn app:app`.
+
+## Important
+
+This tool only surfaces leads for manual review. It does not guarantee project availability, client legitimacy, or payment. Verify the original listing, client identity, scope, budget, deadline and payment method before accepting work. Never pay a client to receive a job.
