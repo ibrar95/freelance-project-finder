@@ -19,8 +19,8 @@ GOOGLE_QUERIES = [
     ("Google News · design client work", '("graphic designer needed" OR "need a logo designer" OR "looking for a designer") (budget OR paid OR "$" OR hourly)'),
     ("Google News · SEO client work", '("SEO expert needed" OR "looking for SEO help" OR "need an SEO specialist") (budget OR paid OR "$" OR hourly)'),
     ("Google News · writing client work", '("content writer needed" OR "looking for a copywriter" OR "need a blog writer") (budget OR paid OR "$" OR per word)'),
-    ("Google News · LinkedIn public posts", 'site:linkedin.com/posts ("freelance project" OR "looking for a freelancer" OR "hiring a freelancer") (paid OR budget OR "$" OR hourly)'),
-    ("Google News · LinkedIn public jobs", 'site:linkedin.com/jobs/view (freelance OR contract) (WordPress OR designer OR SEO OR writer)'),
+    ("Google News · LinkedIn public posts", 'site:linkedin.com/posts ("I am hiring" OR "we are hiring" OR "looking for a freelancer" OR "need a freelancer" OR "freelancer required") (budget OR paid OR "$" OR hourly)'),
+    ("Google News · LinkedIn public jobs", 'site:linkedin.com/jobs/view (freelance OR contract OR "part-time") (WordPress OR designer OR SEO OR writer) (salary OR pay OR compensation OR "$" OR budget)'),
     ("Google News · Upwork indexed listings", 'site:upwork.com/freelance-jobs/ (WordPress OR design OR SEO OR writing) (budget OR hourly)'),
     ("Google News · Freelancer indexed listings", 'site:freelancer.com/projects/ (WordPress OR design OR SEO OR writing)'),
     ("Google News · PeoplePerHour indexed listings", 'site:peopleperhour.com/freelance-jobs (WordPress OR design OR SEO OR writing)'),
@@ -42,7 +42,7 @@ KEYWORDS = {
     "SEO / Marketing": ["seo", "keyword research", "on-page", "backlink", "digital marketing", "social media manager", "facebook ads", "instagram ads"],
     "Writing / Content": ["content writing", "content writer", "blog", "article", "copywriting", "copywriter", "product description", "website content", "writer", "proofreading"],
 }
-# Reject editorial/search-noise, unpaid work and generic employment content.
+# Reject editorial/search-noise, unpaid work and freelancer self-advertising.
 EXCLUDE = [
     "best freelance websites", "best freelancing websites", "how to find freelancers", "how to hire freelancers",
     "top freelance websites", "freelance website list", "freelancing tips", "ultimate guide", "quick guide",
@@ -50,14 +50,29 @@ EXCLUDE = [
     "volunteer", "unpaid", "no pay", "no payment", "exposure only", "commission only", "internship unpaid",
     "full-time employee", "full time employee", "salary package", "investment opportunity"
 ]
-PROJECT_INTENT = [
-    "looking for", "need a", "need an", "needed", "hiring", "hire a", "seeking", "project", "client",
-    "want to build", "want someone", "who can", "can someone", "freelancer required", "freelancer wanted",
-    "job post", "apply", "contract"
+SELLER_PATTERNS = [
+    r"\[\s*for hire\s*\]", r"\[\s*available for hire\s*\]", r"\bfor hire\b",
+    r"\bi offer\b", r"\bi provide\b", r"\bmy services\b", r"\bmy portfolio\b",
+    r"\blooking for work\b", r"\blooking for clients\b", r"\bseeking clients\b",
+    r"\bavailable immediately\b", r"\bhire me\b", r"\bwork with me\b",
+    r"\bmy rate(?:s)?\b", r"\brates start\b", r"\bstarting at \$", r"\bfeel free to dm if (?:you|anyone) (?:need|want)",
+    r"\bi can (?:help|build|design|create|make|write|redesign) (?:you|your)\b"
+]
+# Positive client-side signals only. Generic words such as "project", "client" or "contract" are not enough.
+CLIENT_INTENT_PATTERNS = [
+    r"\[\s*hiring\s*\]", r"\[\s*job\s*\]", r"\bwe(?:'| a)?re hiring\b", r"\bi(?:'| a)?m hiring\b",
+    r"\blooking to hire\b", r"\blooking for a freelancer\b", r"\bneed (?:a|an|someone|help)\b",
+    r"\b(?:developer|designer|writer|seo specialist|wordpress expert|virtual assistant) needed\b",
+    r"\bseeking (?:a|an) (?:freelancer|developer|designer|writer|contractor)\b",
+    r"\bfreelancer required\b", r"\bfreelancer wanted\b", r"\bclient is looking for\b",
+    r"\bcan someone (?:build|design|develop|write|help|create)\b", r"\bwho can (?:build|design|develop|write)\b",
+    r"\bneed someone to\b", r"\blooking for someone to\b", r"\bproject for (?:a|an) freelancer\b",
+    r"\bcommissioning (?:a|an)\b", r"\bseeking applications\b", r"\bjob opening\b"
 ]
 PAID_PATTERNS = [
-    r"\$\s?\d", r"\b(?:usd|aud|gbp|eur|pkr)\s?\d", r"\b\d+(?:\.\d+)?\s?(?:usd|aud|gbp|eur|pkr)\b",
-    r"\b(?:budget|fixed[- ]price|hourly rate|per hour|paid project|paid work|payment|paying|rate is|\$\d+|negotiable budget)\b",
+    r"\$\s?\d[\d,.]*(?:\s?(?:-|to)\s?\$?\d[\d,.]*)?",
+    r"\b(?:usd|aud|gbp|eur|pkr)\s?\d[\d,.]*",
+    r"\b(?:budget|fixed[- ]price|hourly rate|per hour|paid project|paid work|payment|paying|compensation|salary|rate is|budget is)\b",
     r"\b\d+(?:\.\d+)?\s?(?:/hour|per hour|an hour|per word|per article|per project)\b"
 ]
 
@@ -119,12 +134,23 @@ def paid_details(text):
     t = text.lower()
     if any(x in t for x in EXCLUDE):
         return False, ""
+    # Reject obvious freelancer advertisements before checking for money.
+    if any(re.search(p, t, re.I) for p in SELLER_PATTERNS):
+        return False, ""
+    if not any(re.search(p, t, re.I) for p in CLIENT_INTENT_PATTERNS):
+        return False, ""
     if not any(re.search(p, t, re.I) for p in PAID_PATTERNS):
         return False, ""
-    # A payment clue alone is not enough: require a likely client/project request.
-    if not any(x in t for x in PROJECT_INTENT):
-        return False, ""
-    m = re.search(r"(?:\$\s?\d[\d,.]*(?:\s?(?:-|to)\s?\$?\d[\d,.]*)?|\b\d[\d,.]*\s?(?:USD|AUD|GBP|EUR|PKR)\b|\b(?:budget|hourly rate|fixed[- ]price|per hour|per word|negotiable budget)\b[^.;,]{0,45})", text, re.I)
+    # Avoid treating unrelated spend/earnings figures as the project's budget.
+    money = re.search(r"(?:\$\s?\d[\d,.]*(?:\s?(?:-|to)\s?\$?\d[\d,.]*)?|\b\d[\d,.]*\s?(?:USD|AUD|GBP|EUR|PKR)\b)", text, re.I)
+    if money:
+        around = text[max(0, money.start()-65):min(len(text), money.end()+65)].lower()
+        if not any(term in around for term in ["budget", "pay", "paid", "rate", "hour", "per project", "compensation", "salary", "payment", "fixed-price", "fixed price"]):
+            # A client-side hiring post with a clear currency amount can still be a paid lead,
+            # but a large unrelated business metric (e.g. ad spend/ROAS) is not enough.
+            if not re.search(r"(?:budget|pay|paid|rate|hour|compensation|salary|payment)\D{0,35}" + re.escape(money.group(0)), text, re.I):
+                return False, ""
+    m = re.search(r"(?:\$\s?\d[\d,.]*(?:\s?(?:-|to)\s?\$?\d[\d,.]*)?|\b\d[\d,.]*\s?(?:USD|AUD|GBP|EUR|PKR)\b|\b(?:budget|hourly rate|fixed[- ]price|per hour|per word)\b[^.;,]{0,45})", text, re.I)
     return True, (m.group(0).strip() if m else "Paid terms mentioned")
 
 def fetch_source(name, url):
