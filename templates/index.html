@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Freelance Project Finder</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand"><div class="mark">FP</div><div><h1>Freelance Project Finder</h1><p>Fresh public project leads in one place</p></div></div>
+  <button id="refresh" class="primary">↻ Refresh projects</button>
+</header>
+<main>
+  <section class="intro">
+    <div><span class="eyebrow">PROJECT RADAR</span><h2>Find work. Skip the noise.</h2><p>Publicly available opportunities for web, WordPress, graphic design, SEO and content services.</p></div>
+    <div class="stats"><div><strong id="total">—</strong><span>Leads collected</span></div><div><strong id="last">—</strong><span>Last refresh</span></div></div>
+  </section>
+  <section class="toolbar">
+    <input id="search" placeholder="Search projects, skills or keywords…">
+    <select id="category"><option value="">All categories</option><option>Web / WordPress</option><option>Graphic Design</option><option>SEO / Marketing</option><option>Writing / Content</option></select>
+    <button id="searchBtn">Search</button>
+  </section>
+  <div class="subline"><span id="count">Loading projects…</span><span>Newest first · Open original post to verify details</span></div>
+  <section id="cards" class="cards"><div class="empty">Loading public project feeds…</div></section>
+  <section class="sources"><h3>Sources monitored</h3><p>Reddit public feeds and Google News indexed public results. Some platforms restrict automated access; this dashboard does not bypass logins, paywalls or access controls.</p><div class="sourcechips">Reddit · forhire <span>Reddit · hireawriter</span><span>Reddit · slavelabour</span><span>Reddit · DesignJobs</span><span>Reddit · DoneDirtCheap</span><span>Google News public index</span></div></section>
+  <footer>Use each original post link to confirm the client, scope, budget and deadline before applying. Never pay a client to receive work.</footer>
+</main>
+<div id="toast"></div>
+<script src="/static/app.js"></script>
+</body></html>
