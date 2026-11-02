@@ -1,5 +1,6 @@
 import os, re, sqlite3, hashlib, threading, time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
 from urllib.parse import quote_plus
 import feedparser
 import requests
@@ -7,6 +8,7 @@ from bs4 import BeautifulSoup
 from flask import Flask, render_template, request, jsonify
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
+MAX_AGE_DAYS = 3  # Only show leads published within the last 72 hours.
 DB_PATH = os.path.join(APP_DIR, "projects.db")
 app = Flask(__name__)
 
@@ -72,6 +74,37 @@ def init_db():
             budget TEXT DEFAULT '', status TEXT DEFAULT 'new'
         )""")
 
+def parse_published(value, parsed_tuple=None):
+    """Return an aware UTC datetime; unknown dates are rejected for freshness."""
+    if parsed_tuple:
+        try:
+            return datetime(*parsed_tuple[:6], tzinfo=timezone.utc)
+        except Exception:
+            pass
+    if value:
+        try:
+            dt = parsedate_to_datetime(value)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            pass
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            pass
+    return None
+
+def is_fresh(value, parsed_tuple=None):
+    published_dt = parse_published(value, parsed_tuple)
+    if not published_dt:
+        return False
+    now = datetime.now(timezone.utc)
+    return now - timedelta(hours=1) <= published_dt <= now + timedelta(minutes=15) or (published_dt <= now + timedelta(minutes=15) and now - published_dt <= timedelta(days=MAX_AGE_DAYS))
+
 def clean_html(s):
     return BeautifulSoup(s or "", "html.parser").get_text(" ", strip=True)
 
@@ -112,6 +145,10 @@ def fetch_source(name, url):
                 if not title or not link or not cat or not is_paid:
                     continue
                 published = e.get("published", e.get("updated", ""))
+                published_parsed = e.get("published_parsed", e.get("updated_parsed"))
+                # Reject stale or undated posts before they enter the database.
+                if not is_fresh(published, published_parsed):
+                    continue
                 ident = hashlib.sha256(link.encode()).hexdigest()
                 cur = c.execute("""INSERT OR IGNORE INTO projects
                     (id,title,description,url,source,category,published,collected,budget)
@@ -153,12 +190,14 @@ def projects():
         if cat:
             sql += " AND category = ?"
             args.append(cat)
-        sql += " ORDER BY COALESCE(published,'') DESC, collected DESC LIMIT 250"
         rows = [dict(x) for x in c.execute(sql, args).fetchall()]
-        # Recheck old database rows so previously collected articles/unpaid posts disappear.
-        rows = [r for r in rows if paid_details(f"{r.get('title','')} {r.get('description','')}")[0]]
+        # Recheck legacy rows: paid intent AND a known publication date within 72 hours.
+        rows = [r for r in rows if paid_details(f"{r.get('title','')} {r.get('description','')}" )[0]
+                and is_fresh(r.get('published', ''))]
+        rows.sort(key=lambda r: parse_published(r.get('published', '')) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        rows = rows[:250]
         total = len(rows)
-    return jsonify({"projects": rows, "total": total})
+    return jsonify({"projects": rows, "total": total, "max_age_days": MAX_AGE_DAYS})
 
 @app.route("/api/refresh", methods=["POST"])
 def refresh():
@@ -169,9 +208,9 @@ def status():
     init_db()
     with db() as c:
         rows = c.execute("SELECT title, description FROM projects").fetchall()
-        total = sum(1 for x in rows if paid_details(f"{x['title']} {x['description']}")[0])
+        total = sum(1 for x in rows if paid_details(f"{x['title']} {x['description']}")[0] and is_fresh(x['published']))
         latest = c.execute("SELECT MAX(collected) FROM projects").fetchone()[0]
-    return jsonify({"total": total, "last_refresh": latest, "sources": len(SOURCES)})
+    return jsonify({"total": total, "last_refresh": latest, "sources": len(SOURCES), "max_age_days": MAX_AGE_DAYS})
 
 @app.route("/health")
 def health():
