@@ -14,7 +14,7 @@ async function status(){
  const r=await fetch('/api/status');const d=await r.json();total.textContent=d.total;last.textContent=d.last_refresh?niceDate(d.last_refresh):'Not yet';
  if(sourceHealth && d.source_runs){
   const runs=d.source_runs;
-  sourceHealth.innerHTML=runs.length?runs.map(x=>`<div class="healthrow"><span>${esc(x.source)}</span><span class="healthstate ${x.ok?'ok':'bad'}">${x.ok?'OK':'Error'}</span><small>${x.ok?`${x.checked} checked · ${x.accepted||0} matched · ${x.added} new`  : esc(x.error||'Feed unavailable')}</small></div>`).join(''):'<p class="healthnote">No source check recorded yet. Press Refresh projects to run the feeds.</p>';
+  sourceHealth.innerHTML=runs.length?runs.map(x=>`<div class="healthrow"><span>${esc(x.source)}</span><span class="healthstate ${x.ok?'ok':'bad'}">${x.ok?'OK':'Error'}</span><small>${x.ok?`${x.checked} checked · ${x.accepted||0} hiring/payment matches · ${x.stale||0} stale · ${x.undated||0} undated · ${x.duplicate||0} duplicates · ${x.added} new`  : esc(x.error||'Feed unavailable')}</small></div>`).join(''):'<p class="healthnote">No source check recorded yet. Press Refresh projects to run the feeds.</p>';
  }
 }
 document.getElementById('searchBtn').onclick=load;document.getElementById('category').onchange=load;

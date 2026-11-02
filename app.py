@@ -1,4 +1,5 @@
 import os, re, sqlite3, hashlib, threading, time, random
+from collections import Counter
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote_plus
@@ -115,6 +116,9 @@ def init_db():
             c.execute("ALTER TABLE source_runs ADD COLUMN accepted INTEGER DEFAULT 0")
         if "rejected" not in columns:
             c.execute("ALTER TABLE source_runs ADD COLUMN rejected INTEGER DEFAULT 0")
+        for column in ("stale", "duplicate", "undated"):
+            if column not in columns:
+                c.execute(f"ALTER TABLE source_runs ADD COLUMN {column} INTEGER DEFAULT 0")
 
 def parse_published(value, parsed_tuple=None):
     """Return an aware UTC datetime; unknown dates are rejected for freshness."""
@@ -216,6 +220,9 @@ def fetch_source(name, url):
         added = 0
         accepted_count = 0
         rejected_count = 0
+        stale_count = 0
+        undated_count = 0
+        duplicate_count = 0
         with db() as c:
             for e in parsed.entries[:100]:
                 title = clean_html(e.get("title", ""))
@@ -231,7 +238,12 @@ def fetch_source(name, url):
                 published = e.get("published", e.get("updated", ""))
                 published_parsed = e.get("published_parsed", e.get("updated_parsed"))
                 # Reject stale or undated posts before they enter the database.
+                parsed_date = parse_published(published, published_parsed)
+                if not parsed_date:
+                    undated_count += 1
+                    continue
                 if not is_fresh(published, published_parsed):
+                    stale_count += 1
                     continue
                 ident = hashlib.sha256(link.encode()).hexdigest()
                 cur = c.execute("""INSERT OR IGNORE INTO projects
@@ -240,10 +252,12 @@ def fetch_source(name, url):
                     (ident, title[:300], summary[:3000], link, name, cat, published,
                      datetime.now(timezone.utc).isoformat(), budget[:120], lead_status))
                 added += cur.rowcount
+                if not cur.rowcount:
+                    duplicate_count += 1
         result = {"source": name, "ok": True, "added": added, "checked": len(parsed.entries)}
         with db() as c:
-            c.execute("INSERT OR REPLACE INTO source_runs(source,checked_at,ok,checked,accepted,rejected,added,error) VALUES(?,?,?,?,?,?,?,?)",
-                      (name, datetime.now(timezone.utc).isoformat(), 1, len(parsed.entries), accepted_count, rejected_count, added, ""))
+            c.execute("INSERT OR REPLACE INTO source_runs(source,checked_at,ok,checked,accepted,rejected,added,error,stale,duplicate,undated) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                      (name, datetime.now(timezone.utc).isoformat(), 1, len(parsed.entries), accepted_count, rejected_count, added, "", stale_count, duplicate_count, undated_count))
         return result
     except Exception as ex:
         error = str(ex)[:180]
@@ -319,7 +333,7 @@ def status():
         rows = c.execute("SELECT title, description, published FROM projects").fetchall()
         total = sum(1 for x in rows if classify_lead(x['title'], x['description'])[0] and is_fresh(x['published']))
         latest = c.execute("SELECT MAX(checked_at) FROM source_runs").fetchone()[0]
-        runs = [dict(x) for x in c.execute("SELECT source, checked_at, ok, checked, accepted, rejected, added, error FROM source_runs ORDER BY source").fetchall()]
+        runs = [dict(x) for x in c.execute("SELECT source, checked_at, ok, checked, accepted, rejected, added, error, stale, duplicate, undated FROM source_runs ORDER BY source").fetchall()]
     return jsonify({"total": total, "last_refresh": latest, "sources": len(SOURCES), "max_age_days": MAX_AGE_DAYS, "source_runs": runs})
 
 @app.route("/health")

@@ -45,3 +45,8 @@ This build searches globally; it does not geo-restrict to Australia. It includes
 ## Automatic refresh and hosting
 
 The running Flask process refreshes feeds on startup and every `REFRESH_MINUTES` (default 60, minimum 30). Set `ENABLE_BACKGROUND_REFRESH=0` to disable. On Render free tier, services may sleep, so this is **not guaranteed 24/7**. For reliable refreshes use an always-on host or an external scheduler and a persistent database. Set `DB_PATH` to a persistent volume path if available; the default SQLite file can be lost on ephemeral hosting redeploy/restart. The manual refresh endpoint is `POST /api/refresh`.
+
+
+## Source-health diagnostics
+
+Source health now separates accepted hiring/payment matches from stale posts, missing dates, duplicates and new inserts. A match is not necessarily a fresh lead. Reddit HTTP 429 indicates rate limiting; this app does not bypass it. Google News indexes are not direct LinkedIn/marketplace integrations.
