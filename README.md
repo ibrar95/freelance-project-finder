@@ -36,3 +36,12 @@ Configured for Render with `gunicorn app:app`.
 ## Important
 
 This tool only surfaces leads for manual review. It does not guarantee project availability, client legitimacy, or payment. Verify the original listing, client identity, scope, budget, deadline and payment method before accepting work. Never pay a client to receive a job.
+
+
+## Worldwide and LinkedIn public-index mode
+
+This build searches globally; it does not geo-restrict to Australia. It includes five skill categories, including Video Editing, and multiple search queries targeting publicly indexed LinkedIn Jobs/posts. **This is not a LinkedIn login/API integration**, and search-engine coverage may be incomplete or delayed. No scraping of LinkedIn authenticated pages occurs. No automatic applications or messages are sent.
+
+## Automatic refresh and hosting
+
+The running Flask process refreshes feeds on startup and every `REFRESH_MINUTES` (default 60, minimum 30). Set `ENABLE_BACKGROUND_REFRESH=0` to disable. On Render free tier, services may sleep, so this is **not guaranteed 24/7**. For reliable refreshes use an always-on host or an external scheduler and a persistent database. Set `DB_PATH` to a persistent volume path if available; the default SQLite file can be lost on ephemeral hosting redeploy/restart. The manual refresh endpoint is `POST /api/refresh`.

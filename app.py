@@ -1,4 +1,4 @@
-import os, re, sqlite3, hashlib, threading, time
+import os, re, sqlite3, hashlib, threading, time, random
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote_plus
@@ -9,7 +9,8 @@ from flask import Flask, render_template, request, jsonify
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 MAX_AGE_DAYS = 3  # Only show leads published within the last 72 hours.
-DB_PATH = os.path.join(APP_DIR, "projects.db")
+DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "projects.db"))
+REFRESH_MINUTES = max(30, int(os.environ.get("REFRESH_MINUTES", "60")))
 app = Flask(__name__)
 
 # Public RSS feeds and indexed public search results. These are NOT private platform APIs.
@@ -25,6 +26,11 @@ GOOGLE_QUERIES = [
     ("Google News · Freelancer indexed listings", 'site:freelancer.com/projects/ (WordPress OR design OR SEO OR writing)'),
     ("Google News · PeoplePerHour indexed listings", 'site:peopleperhour.com/freelance-jobs (WordPress OR design OR SEO OR writing)'),
     ("Google News · Contra indexed listings", 'site:contra.com (freelance project OR hire freelancer) (design OR website OR SEO)'),
+    ("Google News · LinkedIn video editors", 'site:linkedin.com/posts/ ("hiring video editor" OR "looking for video editor" OR "need a video editor" OR "video editor needed") (freelance OR paid OR project OR contract)'),
+    ("Google News · LinkedIn remote design", 'site:linkedin.com/jobs/view/ ("graphic designer" OR "brand designer" OR "video editor") (remote OR contract OR freelance)'),
+    ("Google News · LinkedIn remote web", 'site:linkedin.com/jobs/view/ ("wordpress developer" OR "shopify developer" OR "web designer") (remote OR freelance OR contract)'),
+    ("Google News · LinkedIn remote marketing", 'site:linkedin.com/jobs/view/ ("SEO specialist" OR "digital marketing" OR "content writer") (remote OR freelance OR contract)'),
+    ("Google News · video editing clients", '("video editor needed" OR "hiring video editor" OR "looking for video editor") (paid OR budget OR freelance OR contract)'),
     ("Google News · Airtasker indexed listings", 'site:airtasker.com/tasks (website OR design OR SEO OR writing)'),
 ]
 SOURCES = [
@@ -40,6 +46,7 @@ KEYWORDS = {
     "Web / WordPress": ["wordpress", "website", "web developer", "web development", "landing page", "shopify", "woocommerce", "ecommerce", "web design"],
     "Graphic Design": ["logo", "branding", "brand identity", "graphic design", "graphic designer", "flyer", "brochure", "banner", "social media design", "packaging"],
     "SEO / Marketing": ["seo", "keyword research", "on-page", "backlink", "digital marketing", "social media manager", "facebook ads", "instagram ads"],
+    "Video Editing": ["video editing", "video editor", "video production", "youtube shorts", "youtube editor", "reels editor", "short-form video", "short form video", "tiktok editor", "podcast editing", "motion graphics", "premiere pro", "after effects", "video captions"],
     "Writing / Content": ["content writing", "content writer", "blog", "article", "copywriting", "copywriter", "product description", "website content", "writer", "proofreading"],
 }
 # Classification is deliberately split into client intent and payment confidence.
@@ -64,14 +71,14 @@ SELLER_BODY_PATTERNS = [
 ]
 CLIENT_INTENT_PATTERNS = [
     r"\[\s*hiring\s*\]", r"\[\s*job\s*\]", r"\bwe(?:'re| are) hiring\b", r"\bi(?:'m| am) hiring\b",
-    r"\blooking to hire\b", r"\blooking for (?:a |an )?(?:freelancer|developer|designer|writer|agency|virtual assistant)\b",
-    r"\bneed (?:a |an |someone|help|someone to)\b", r"\b(?:developer|designer|writer|seo specialist|wordpress expert|virtual assistant) needed\b",
-    r"\bseeking (?:a |an )?(?:freelancer|developer|designer|writer|contractor)\b",
+    r"\blooking to hire\b", r"\blooking for (?:a |an )?(?:freelancer|developer|designer|writer|editor|videographer|agency|virtual assistant)\b",
+    r"\bneed (?:a |an |someone|help|someone to)\b", r"\b(?:developer|designer|writer|video editor|seo specialist|wordpress expert|virtual assistant) needed\b",
+    r"\bseeking (?:a |an )?(?:freelancer|developer|designer|writer|video editor|contractor)\b",
     r"\bfreelancer required\b", r"\bfreelancer wanted\b", r"\bclient is looking for\b",
     r"\bcan someone (?:build|design|develop|write|help|create)\b", r"\bwho can (?:build|design|develop|write)\b",
     r"\bneed someone to\b", r"\blooking for someone to\b", r"\bproject for (?:a|an) freelancer\b",
     r"\bcommissioning (?:a|an)\b", r"\bseeking applications\b", r"\bjob opening\b",
-    r"\bwant to hire\b", r"\bwe need (?:a |an )?(?:developer|designer|writer|freelancer|wordpress|website)\b"
+    r"\bwant to hire\b", r"\bwe need (?:a |an )?(?:developer|designer|writer|video editor|freelancer|wordpress|website)\b"
 ]
 PAYMENT_PATTERNS = [
     r"\$\s?\d[\d,.]*(?:\s?(?:-|to)\s?\$?\d[\d,.]*)?",
@@ -145,7 +152,7 @@ def clean_html(s):
 
 def category_for(text):
     t = text.lower()
-    for category, words in KEYWORDS.items():
+    for category, words in sorted(KEYWORDS.items(), key=lambda kv: 0 if kv[0] == "Video Editing" else 1):
         if any(w in t for w in words):
             return category
     return None
@@ -203,7 +210,7 @@ def paid_details(text):
 def fetch_source(name, url):
     headers = {"User-Agent": "Mozilla/5.0 (compatible; FreelanceProjectFinder/2.0; +https://github.com/)"}
     try:
-        response = requests.get(url, headers=headers, timeout=18)
+        response = requests.get(url, headers=headers, timeout=12)
         response.raise_for_status()
         parsed = feedparser.parse(response.content)
         added = 0
@@ -245,8 +252,19 @@ def fetch_source(name, url):
                       (name, datetime.now(timezone.utc).isoformat(), 0, 0, 0, 0, 0, error))
         return {"source": name, "ok": False, "added": 0, "error": error}
 
+refresh_lock = threading.Lock()
 def refresh_all():
-    return [fetch_source(n, u) for n, u in SOURCES]
+    # Avoid simultaneous refreshes from web requests and the scheduler.
+    if not refresh_lock.acquire(blocking=False):
+        return [{"source": "Scheduler", "ok": False, "added": 0, "error": "Refresh already running"}]
+    try:
+        results = [fetch_source(n, u) for n, u in SOURCES]
+        with db() as c:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=MAX_AGE_DAYS + 2)).isoformat()
+            c.execute("DELETE FROM projects WHERE collected < ?", (cutoff,))
+        return results
+    finally:
+        refresh_lock.release()
 
 def background_refresh():
     while True:
@@ -254,7 +272,7 @@ def background_refresh():
             refresh_all()
         except Exception:
             pass
-        time.sleep(60 * 60 * 4)
+        time.sleep(REFRESH_MINUTES * 60)
 
 @app.route("/")
 def home():
@@ -309,7 +327,10 @@ def health():
     return {"ok": True}
 
 init_db()
-threading.Thread(target=background_refresh, daemon=True).start()
+# Starts automatically on each running web instance. Free hosting may sleep,
+# so continuous refresh requires an always-on service or an external scheduler.
+if os.environ.get("ENABLE_BACKGROUND_REFRESH", "1") == "1":
+    threading.Thread(target=background_refresh, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
