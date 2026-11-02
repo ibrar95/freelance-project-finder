@@ -10,25 +10,54 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(APP_DIR, "projects.db")
 app = Flask(__name__)
 
-# Public RSS/search feeds. Add or remove sources in SOURCES below.
+# Public RSS feeds and indexed public search results. These are NOT private platform APIs.
+GOOGLE_QUERIES = [
+    ("Google News · paid freelance projects", '"looking for" freelancer ("budget" OR "$" OR "paid" OR "hourly") (website OR wordpress OR design OR SEO OR writer)'),
+    ("Google News · WordPress client work", '("WordPress developer needed" OR "need a WordPress website" OR "WordPress project") (budget OR paid OR "$" OR hourly)'),
+    ("Google News · design client work", '("graphic designer needed" OR "need a logo designer" OR "looking for a designer") (budget OR paid OR "$" OR hourly)'),
+    ("Google News · SEO client work", '("SEO expert needed" OR "looking for SEO help" OR "need an SEO specialist") (budget OR paid OR "$" OR hourly)'),
+    ("Google News · writing client work", '("content writer needed" OR "looking for a copywriter" OR "need a blog writer") (budget OR paid OR "$" OR per word)'),
+    ("Google News · LinkedIn public posts", 'site:linkedin.com/posts ("freelance project" OR "looking for a freelancer" OR "hiring a freelancer") (paid OR budget OR "$" OR hourly)'),
+    ("Google News · LinkedIn public jobs", 'site:linkedin.com/jobs/view (freelance OR contract) (WordPress OR designer OR SEO OR writer)'),
+    ("Google News · Upwork indexed listings", 'site:upwork.com/freelance-jobs/ (WordPress OR design OR SEO OR writing) (budget OR hourly)'),
+    ("Google News · Freelancer indexed listings", 'site:freelancer.com/projects/ (WordPress OR design OR SEO OR writing)'),
+    ("Google News · PeoplePerHour indexed listings", 'site:peopleperhour.com/freelance-jobs (WordPress OR design OR SEO OR writing)'),
+    ("Google News · Contra indexed listings", 'site:contra.com (freelance project OR hire freelancer) (design OR website OR SEO)'),
+    ("Google News · Airtasker indexed listings", 'site:airtasker.com/tasks (website OR design OR SEO OR writing)'),
+]
 SOURCES = [
     ("Reddit · forhire", "https://www.reddit.com/r/forhire/search.rss?q=(wordpress%20OR%20website%20OR%20SEO%20OR%20logo%20OR%20design%20OR%20writing)&restrict_sr=1&sort=new"),
     ("Reddit · hireawriter", "https://www.reddit.com/r/HireaWriter/new/.rss"),
-    ("Reddit · slavelabour", "https://www.reddit.com/r/slavelabour/search.rss?q=(website%20OR%20wordpress%20OR%20design%20OR%20SEO)&restrict_sr=1&sort=new"),
     ("Reddit · DesignJobs", "https://www.reddit.com/r/DesignJobs/new/.rss"),
+    ("Reddit · slavelabour", "https://www.reddit.com/r/slavelabour/search.rss?q=(website%20OR%20wordpress%20OR%20design%20OR%20SEO)&restrict_sr=1&sort=new"),
     ("Reddit · DoneDirtCheap", "https://www.reddit.com/r/DoneDirtCheap/search.rss?q=(design%20OR%20website%20OR%20SEO)&restrict_sr=1&sort=new"),
-    ("Google News · freelance projects", "https://news.google.com/rss/search?q=" + quote_plus('"looking for" freelancer (website OR wordpress OR design OR SEO OR content)')),
-    ("Google News · WordPress work", "https://news.google.com/rss/search?q=" + quote_plus('"WordPress" "looking for" freelancer OR project')),
-    ("Google News · graphic design work", "https://news.google.com/rss/search?q=" + quote_plus('"graphic designer" "looking for" freelance project')),
 ]
+SOURCES += [(name, "https://news.google.com/rss/search?q=" + quote_plus(query) + "&hl=en-US&gl=US&ceid=US:en") for name, query in GOOGLE_QUERIES]
 
 KEYWORDS = {
     "Web / WordPress": ["wordpress", "website", "web developer", "web development", "landing page", "shopify", "woocommerce", "ecommerce", "web design"],
-    "Graphic Design": ["logo", "branding", "brand identity", "graphic design", "flyer", "brochure", "banner", "social media design", "packaging"],
+    "Graphic Design": ["logo", "branding", "brand identity", "graphic design", "graphic designer", "flyer", "brochure", "banner", "social media design", "packaging"],
     "SEO / Marketing": ["seo", "keyword research", "on-page", "backlink", "digital marketing", "social media manager", "facebook ads", "instagram ads"],
-    "Writing / Content": ["content writing", "blog", "article", "copywriting", "product description", "website content", "writer", "proofreading"],
+    "Writing / Content": ["content writing", "content writer", "blog", "article", "copywriting", "copywriter", "product description", "website content", "writer", "proofreading"],
 }
-EXCLUDE = ["course", "webinar", "job alert newsletter", "hiring full time", "salary package", "investment opportunity"]
+# Reject editorial/search-noise, unpaid work and generic employment content.
+EXCLUDE = [
+    "best freelance websites", "best freelancing websites", "how to find freelancers", "how to hire freelancers",
+    "top freelance websites", "freelance website list", "freelancing tips", "ultimate guide", "quick guide",
+    "what is freelancing", "course", "webinar", "tutorial", "template download", "job alert newsletter",
+    "volunteer", "unpaid", "no pay", "no payment", "exposure only", "commission only", "internship unpaid",
+    "full-time employee", "full time employee", "salary package", "investment opportunity"
+]
+PROJECT_INTENT = [
+    "looking for", "need a", "need an", "needed", "hiring", "hire a", "seeking", "project", "client",
+    "want to build", "want someone", "who can", "can someone", "freelancer required", "freelancer wanted",
+    "job post", "apply", "contract"
+]
+PAID_PATTERNS = [
+    r"\$\s?\d", r"\b(?:usd|aud|gbp|eur|pkr)\s?\d", r"\b\d+(?:\.\d+)?\s?(?:usd|aud|gbp|eur|pkr)\b",
+    r"\b(?:budget|fixed[- ]price|hourly rate|per hour|paid project|paid work|payment|paying|rate is|\$\d+|negotiable budget)\b",
+    r"\b\d+(?:\.\d+)?\s?(?:/hour|per hour|an hour|per word|per article|per project)\b"
+]
 
 def db():
     conn = sqlite3.connect(DB_PATH)
@@ -53,38 +82,49 @@ def category_for(text):
             return category
     return None
 
+def paid_details(text):
+    t = text.lower()
+    if any(x in t for x in EXCLUDE):
+        return False, ""
+    if not any(re.search(p, t, re.I) for p in PAID_PATTERNS):
+        return False, ""
+    # A payment clue alone is not enough: require a likely client/project request.
+    if not any(x in t for x in PROJECT_INTENT):
+        return False, ""
+    m = re.search(r"(?:\$\s?\d[\d,.]*(?:\s?(?:-|to)\s?\$?\d[\d,.]*)?|\b\d[\d,.]*\s?(?:USD|AUD|GBP|EUR|PKR)\b|\b(?:budget|hourly rate|fixed[- ]price|per hour|per word|negotiable budget)\b[^.;,]{0,45})", text, re.I)
+    return True, (m.group(0).strip() if m else "Paid terms mentioned")
+
 def fetch_source(name, url):
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; ProjectFinder/1.0; +https://example.com)"}
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; FreelanceProjectFinder/2.0; +https://github.com/)"}
     try:
         response = requests.get(url, headers=headers, timeout=18)
         response.raise_for_status()
         parsed = feedparser.parse(response.content)
-        count = 0
+        added = 0
         with db() as c:
-            for e in parsed.entries[:80]:
+            for e in parsed.entries[:100]:
                 title = clean_html(e.get("title", ""))
                 summary = clean_html(e.get("summary", e.get("description", "")))
                 link = e.get("link", "")
-                text = f"{title} {summary}"
-                cat = category_for(text)
-                if not title or not link or not cat:
-                    continue
-                if any(x in text.lower() for x in EXCLUDE):
+                combined = f"{title} {summary}"
+                cat = category_for(combined)
+                is_paid, budget = paid_details(combined)
+                if not title or not link or not cat or not is_paid:
                     continue
                 published = e.get("published", e.get("updated", ""))
                 ident = hashlib.sha256(link.encode()).hexdigest()
-                c.execute("""INSERT OR IGNORE INTO projects
-                    (id,title,description,url,source,category,published,collected)
-                    VALUES (?,?,?,?,?,?,?,?)""",
-                    (ident, title[:300], summary[:3000], link, name, cat, published, datetime.now(timezone.utc).isoformat()))
-                count += c.total_changes
-        return {"source": name, "ok": True, "added": count}
+                cur = c.execute("""INSERT OR IGNORE INTO projects
+                    (id,title,description,url,source,category,published,collected,budget)
+                    VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (ident, title[:300], summary[:3000], link, name, cat, published,
+                     datetime.now(timezone.utc).isoformat(), budget[:120]))
+                added += cur.rowcount
+        return {"source": name, "ok": True, "added": added, "checked": len(parsed.entries)}
     except Exception as ex:
-        return {"source": name, "ok": False, "error": str(ex)[:180]}
+        return {"source": name, "ok": False, "added": 0, "error": str(ex)[:180]}
 
 def refresh_all():
-    results = [fetch_source(n, u) for n, u in SOURCES]
-    return results
+    return [fetch_source(n, u) for n, u in SOURCES]
 
 def background_refresh():
     while True:
@@ -115,7 +155,9 @@ def projects():
             args.append(cat)
         sql += " ORDER BY COALESCE(published,'') DESC, collected DESC LIMIT 250"
         rows = [dict(x) for x in c.execute(sql, args).fetchall()]
-        total = c.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
+        # Recheck old database rows so previously collected articles/unpaid posts disappear.
+        rows = [r for r in rows if paid_details(f"{r.get('title','')} {r.get('description','')}")[0]]
+        total = len(rows)
     return jsonify({"projects": rows, "total": total})
 
 @app.route("/api/refresh", methods=["POST"])
@@ -126,7 +168,8 @@ def refresh():
 def status():
     init_db()
     with db() as c:
-        total = c.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
+        rows = c.execute("SELECT title, description FROM projects").fetchall()
+        total = sum(1 for x in rows if paid_details(f"{x['title']} {x['description']}")[0])
         latest = c.execute("SELECT MAX(collected) FROM projects").fetchone()[0]
     return jsonify({"total": total, "last_refresh": latest, "sources": len(SOURCES)})
 
